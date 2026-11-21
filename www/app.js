@@ -1,12 +1,13 @@
-/* SRK Bot — a team of personal AI bots, powered by Google Gemini or OpenAI.
+/* SRK Bot — a team of personal AI bots, powered by Google Gemini, OpenAI or OpenRouter's free models.
  * Everything is stored on the device (localStorage). Each API key is sent only to its own provider
- * (generativelanguage.googleapis.com or api.openai.com).
+ * (generativelanguage.googleapis.com, api.openai.com or openrouter.ai).
  */
 (() => {
   "use strict";
 
   const OPENAI_BASE = "https://api.openai.com/v1";
   const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
+  const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
   const MODELS = [
     { id: "gemini-3.8-flash", label: "Gemini 3.8 Flash — smart and fast (default)" },
     { id: "gemini-3.5-flash-lite", label: "Gemini 3.5 Flash-Lite — fastest" },
@@ -19,15 +20,18 @@
   const OFFLINE_ONLY = window.SRK_EDITION === "offline"; // "SRK Bot Offline" app: on-device models only
   const OFFLINE_DEFAULT = "local:gemma-3-1b";
   const DEFAULT_MODEL = OFFLINE_ONLY ? OFFLINE_DEFAULT : MODELS[0].id;
-  const providerOf = (id) => (id.startsWith("local:") ? "local" : /^(gemini|gemma|learnlm)/.test(id) ? "gemini" : "openai");
-  const PROVIDER_NAME = { gemini: "Gemini", openai: "OpenAI", local: "Offline" };
-  const keyFor = (prov) => (prov === "gemini" ? state.settings.geminiKey : state.settings.apiKey) || "";
+  // OpenRouter model ids look like "vendor/model:free" (the only ids with a "/").
+  const providerOf = (id) => (id.startsWith("local:") ? "local" : id.includes("/") ? "openrouter" : /^(gemini|gemma|learnlm)/.test(id) ? "gemini" : "openai");
+  const PROVIDER_NAME = { gemini: "Gemini", openai: "OpenAI", openrouter: "OpenRouter", local: "Offline" };
+  const keyFor = (prov) => (prov === "gemini" ? state.settings.geminiKey : prov === "openrouter" ? state.settings.openrouterKey : state.settings.apiKey) || "";
+  const hasAnyKey = () => !!(state.settings.apiKey || state.settings.geminiKey || state.settings.openrouterKey);
   // All selectable models: the built-in list plus any loaded from the user's accounts in Settings.
   function allModels() {
     const out = OFFLINE_ONLY ? [] : MODELS.slice();
-    const extra = OFFLINE_ONLY ? [] : [...(state.settings.geminiModels || []), ...(state.settings.accountModels || [])];
+    const extra = OFFLINE_ONLY ? [] : [...(state.settings.geminiModels || []), ...(state.settings.accountModels || []), ...(state.settings.orModels || [])];
     for (const id of extra) {
-      if (!out.some((m) => m.id === id)) out.push({ id, label: id + (providerOf(id) === "openai" ? " (OpenAI)" : "") });
+      const p = providerOf(id);
+      if (!out.some((m) => m.id === id)) out.push({ id, label: id + (p === "openai" ? " (OpenAI)" : p === "openrouter" ? " (OpenRouter, free)" : "") });
     }
     for (const m of offlineModels()) {
       out.push({ id: m.id, label: "📴 Offline · " + m.label + (offlineDownloaded.includes(m.id) ? "" : " (download in Settings)") });
@@ -40,7 +44,7 @@
 
   // ---------- state ----------
   const defaultState = () => ({
-    settings: { apiKey: "", geminiKey: "", maxTokens: 4096, accountModels: [], geminiModels: [], v3: true },
+    settings: { apiKey: "", geminiKey: "", openrouterKey: "", maxTokens: 4096, accountModels: [], geminiModels: [], orModels: [], v3: true },
     bots: [
       makeBot("🤖", "SRK Assistant", "You are SRK Assistant, a friendly, sharp general helper. Be clear and concise.", true),
       makeBot("🩺", "Surgery Tutor", "You are a senior general surgery consultant who teaches postgraduate (DNB/MS) trainees. Explain concepts step by step, cite standard textbooks (Bailey & Love, Sabiston, Schwartz) where relevant, and quiz the user when asked.", true),
@@ -158,7 +162,7 @@
 
   // ---------- bot list ----------
   function renderList() {
-    $("key-warning").classList.toggle("hidden", !!(state.settings.apiKey || state.settings.geminiKey || offlineDownloaded.length));
+    $("key-warning").classList.toggle("hidden", !!(hasAnyKey() || offlineDownloaded.length));
     const ul = $("bot-list"); ul.innerHTML = "";
     const bots = [...state.bots].sort((a, b) => b.updated - a.updated);
     if (!bots.length) {
@@ -255,7 +259,8 @@
     const name = PROVIDER_NAME[prov];
     if (res.status === 401 || /API key not valid|API_KEY_INVALID/i.test(raw)) msg = "Invalid " + name + " API key. Check it in Settings.";
     else if (res.status === 429) msg = name + " says: " + msg + (prov === "gemini"
-      ? " (free-tier limit reached — wait a minute, or pick a lighter model like Flash-Lite)."
+      ? " (free-tier limit reached — wait a minute, pick a lighter model like Flash-Lite, or add a free OpenRouter key in Settings as a backup)."
+      : prov === "openrouter" ? " (OpenRouter free-model limit reached — try again later or pick another free model)."
       : " (rate limit or no credit left on your account).");
     else if (res.status === 404) msg = msg + " — pick another model for this bot (✏️), or load your models in Settings.";
     return msg;
@@ -272,8 +277,20 @@
         if (plan.length >= 5) break;
         if (m !== model && !plan.includes(m) && (!avail.length || avail.includes(m))) plan.push(m);
       }
+    } else if (prov === "openrouter") {
+      for (const m of orFreeModels()) {
+        if (plan.length >= 5) break;
+        if (!plan.includes(m)) plan.push(m);
+      }
     }
     return plan;
+  }
+  // OpenRouter free models loaded in Settings, best general chat models first.
+  const OR_PREFER = [/deepseek.*(chat|v3)/, /llama-3\.3-70b|llama-4/, /qwen.*(235b|72b|32b)/, /gemma-3-27b/, /mistral.*(small|medium)/, /deepseek/];
+  function orFreeModels() {
+    const ids = (state.settings.orModels || []).slice();
+    const rank = (id) => { const i = OR_PREFER.findIndex((re) => re.test(id)); return i < 0 ? 99 : i; };
+    return ids.sort((a, b) => rank(a) - rank(b));
   }
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -289,6 +306,13 @@
           contents: msgs.map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] })),
           generationConfig: { maxOutputTokens: maxTok },
         },
+      };
+    }
+    if (prov === "openrouter") {
+      return {
+        url: OPENROUTER_BASE + "/chat/completions",
+        headers: { "content-type": "application/json", "authorization": "Bearer " + keyFor("openrouter"), "X-Title": "SRK Bot" },
+        body: { model, messages: [{ role: "system", content: sys }, ...msgs], max_tokens: maxTok, stream: true },
       };
     }
     return {
@@ -309,6 +333,11 @@
       if (!t && !hasText && /SAFETY|PROHIBITED|BLOCKLIST|RECITATION/.test(c.finishReason || "")) throw new Error("Gemini stopped the reply (" + c.finishReason + ").");
       if (!t && !hasText && c.finishReason === "MAX_TOKENS") throw new Error("Reply was cut off. Try a higher max reply length in Settings.");
       return t;
+    }
+    if (prov === "openrouter") {
+      if (ev.error) throw new Error("OpenRouter: " + (ev.error.message || "error"));
+      const ch = ev.choices && ev.choices[0];
+      return (ch && ch.delta && typeof ch.delta.content === "string") ? ch.delta.content : "";
     }
     if (ev.type === "response.output_text.delta" && typeof ev.delta === "string") return ev.delta;
     if (ev.type === "error") throw new Error(ev.message || (ev.error && ev.error.message) || "Stream error");
@@ -356,9 +385,10 @@
     });
   }
 
-  async function streamOnline(b, prov, onText) {
-    let res, usedModel = b.model;
-    const plan = attemptPlan(b.model, prov);
+  async function streamOnline(b, prov, onText, startModel) {
+    startModel = startModel || b.model;
+    let res, usedModel = startModel;
+    const plan = attemptPlan(startModel, prov);
     for (let i = 0; i < plan.length; i++) {
       usedModel = plan[i];
       if (i > 0) await sleep(i === 1 ? 1500 : 500);
@@ -369,7 +399,7 @@
       });
       if (res.ok) break;
       const busy = [429, 500, 502, 503, 504].includes(res.status);
-      if (!busy || i === plan.length - 1) throw new Error(await apiError(res, prov));
+      if (!busy || i === plan.length - 1) { const e = new Error(await apiError(res, prov)); e.busy = busy; throw e; }
       if (i >= 1) toast(modelLabel(usedModel) + " is busy — trying another model…");
       try { await res.text(); } catch (e) {}
     }
@@ -399,7 +429,7 @@
     if (prov === "local" && !offlineDownloaded.includes(b.model)) {
       toast("Download this offline model first: ⚙️ Settings → Offline AI"); return;
     }
-    if (prov !== "local" && !keyFor(prov) && !offlineDownloaded.length) {
+    if (prov !== "local" && !keyFor(prov) && !offlineDownloaded.length && !(prov !== "openrouter" && state.settings.openrouterKey)) {
       toast("Add your " + PROVIDER_NAME[prov] + " API key in Settings first"); return;
     }
     if (!b.messages.length) $("messages").innerHTML = "";
@@ -426,9 +456,20 @@
         await streamLocal(b.model, b, onText, setStatus);
       } else {
         try {
-          if (!keyFor(prov)) throw new TypeError("no key");
-          const used = await streamOnline(b, prov, onText);
-          if (used !== b.model) switchNote = "⚡ " + modelLabel(b.model) + " was busy, so " + modelLabel(used) + " answered";
+          try {
+            if (!keyFor(prov)) { const e = new Error("no key"); e.noKey = true; throw e; }
+            const used = await streamOnline(b, prov, onText);
+            if (used !== b.model) switchNote = "⚡ " + modelLabel(b.model) + " was busy, so " + modelLabel(used) + " answered";
+          } catch (err) {
+            // Gemini/OpenAI over its limit (or no key for it)? Answer with a free OpenRouter model instead.
+            const orBackup = prov !== "openrouter" && state.settings.openrouterKey && orFreeModels().length;
+            if (!full && err.name !== "AbortError" && (err.busy || err.noKey) && orBackup) {
+              const used = await streamOnline(b, "openrouter", onText, orFreeModels()[0]);
+              switchNote = "🔁 " + (err.noKey ? "No " + PROVIDER_NAME[prov] + " key" : PROVIDER_NAME[prov] + " was over its limit") +
+                ", so " + modelLabel(used).replace(" (OpenRouter, free)", "") + " (OpenRouter, free) answered";
+            } else if (err.noKey) throw new TypeError("no key");
+            else throw err;
+          }
         } catch (err) {
           // No internet (or no key)? Answer with a downloaded offline model instead.
           if (!full && err.name !== "AbortError" && isNetworkError(err) && offlineDownloaded.length) {
@@ -506,6 +547,7 @@
   function openSettings() {
     $("s-key").value = state.settings.apiKey || "";
     $("s-gkey").value = state.settings.geminiKey || "";
+    $("s-okey").value = state.settings.openrouterKey || "";
     $("s-maxtok").value = state.settings.maxTokens;
     $("test-result").textContent = "";
     refreshOffline().then(renderOfflineList);
@@ -515,13 +557,15 @@
   async function testKey() {
     state.settings.apiKey = $("s-key").value.trim();
     state.settings.geminiKey = $("s-gkey").value.trim();
+    state.settings.openrouterKey = $("s-okey").value.trim();
     state.settings.maxTokens = Math.min(64000, Math.max(256, +$("s-maxtok").value || 4096));
     save();
     const out = $("test-result");
-    if (!state.settings.apiKey && !state.settings.geminiKey) { out.textContent = "No keys saved."; return; }
+    if (!hasAnyKey()) { out.textContent = "No keys saved."; return; }
     out.textContent = "Testing…";
     const lines = [];
     if (state.settings.geminiKey) lines.push(await testGemini());
+    if (state.settings.openrouterKey) lines.push(await testOpenRouter());
     if (state.settings.apiKey) lines.push(await testOpenAI());
     out.innerHTML = lines.map(esc).join("<br>");
   }
@@ -539,6 +583,19 @@
       const missing = MODELS.filter((m) => providerOf(m.id) === "gemini" && !ids.includes(m.id)).map((m) => m.id);
       return "Gemini ✅ Key works. " + ids.length + " chat models available." + (missing.length ? " Not available to you: " + missing.join(", ") + "." : "");
     } catch (e) { return "Gemini ❌ Network error: " + e.message; }
+  }
+  async function testOpenRouter() {
+    try {
+      const kr = await fetch(OPENROUTER_BASE + "/key", { headers: { "authorization": "Bearer " + state.settings.openrouterKey } });
+      if (!kr.ok) return "OpenRouter ❌ " + (await apiError(kr, "openrouter"));
+      const res = await fetch(OPENROUTER_BASE + "/models");
+      if (!res.ok) return "OpenRouter ❌ Could not load models (HTTP " + res.status + ")";
+      const j = await res.json();
+      const ids = (j.data || []).map((m) => m.id)
+        .filter((id) => /:free$/.test(id) && !/(vision|image|audio|embed|guard|moderation)/.test(id));
+      state.settings.orModels = ids; save();
+      return "OpenRouter ✅ Key works. " + ids.length + " free models — used automatically when Gemini is over its limit.";
+    } catch (e) { return "OpenRouter ❌ Network error: " + e.message; }
   }
   async function testOpenAI() {
     try {
@@ -706,5 +763,5 @@
     $("key-warning").innerHTML = "Download an offline AI model in <b>Settings</b> to start chatting (one time, over Wi-Fi).";
     $("offline-hint").textContent = "Download a model once over Wi-Fi. Everything then runs on your phone — no internet, no API key, free and private. Bigger models are smarter but slower.";
     document.querySelectorAll(".app-name").forEach((e) => (e.textContent = "SRK Bot Offline"));
-  } else if (!state.settings.apiKey && !state.settings.geminiKey) setTimeout(openSettings, 300);
+  } else if (!hasAnyKey()) setTimeout(openSettings, 300);
 })();

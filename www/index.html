@@ -88,10 +88,14 @@
         <input id="s-gkey" type="password" autocomplete="off" placeholder="AIza…">
       </label>
       <p class="hint">Get a free key at aistudio.google.com → Get API key. No card needed.</p>
+      <label>OpenRouter API key (free backup)
+        <input id="s-okey" type="password" autocomplete="off" placeholder="sk-or-…">
+      </label>
+      <p class="hint">Optional. Free key at openrouter.ai → Keys (no card). When Gemini hits its free limit, bots answer with OpenRouter's free models (DeepSeek, Llama, Qwen…).</p>
       <label>OpenAI API key (optional, paid)
         <input id="s-key" type="password" autocomplete="off" placeholder="sk-proj-…">
       </label>
-      <p class="hint">Only needed for GPT bots. Keys are stored only on this device and sent only to Google or OpenAI.</p>
+      <p class="hint">Only needed for GPT bots. Keys are stored only on this device and sent only to Google, OpenRouter or OpenAI.</p>
       <button class="primary" id="btn-test-key">Save, test keys &amp; load my models</button>
       <p class="hint" id="test-result"></p>
       <hr>
