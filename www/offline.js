@@ -89,15 +89,8 @@ async function ensureLoaded(id, onStatus) {
     const model = await cachedModel(id);
     if (!model) throw new Error("This offline model isn't downloaded yet. Download it in ⚙️ Settings → Offline AI.");
     onStatus && onStatus("Loading offline model into memory…");
-    try {
-      await engine().loadModel(model, { n_ctx: N_CTX }); // uses the phone GPU (WebGPU) when available
-    } catch (e) {
-      // GPU path failed on this device — retry on CPU only
-      try { await wllama.exit(); } catch (x) {}
-      wllama = null;
-      onStatus && onStatus("Loading offline model (CPU mode)…");
-      await engine().loadModel(model, { n_ctx: N_CTX, n_gpu_layers: 0 });
-    }
+    // CPU only: the phone-GPU (WebGPU) path gives garbage output ("@@@@") on mobile chips.
+    await engine().loadModel(model, { n_ctx: N_CTX, n_gpu_layers: 0 });
     loadedId = id;
   })();
   try { await loading; } finally { loading = null; }
