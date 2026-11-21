@@ -1,13 +1,13 @@
 # SRK Bot
 
-Your own team of AI bots in one chat app, powered by **OpenAI** (GPT models). Part of the SRK app family by ShazVerse Technologies.
+Your own team of AI bots in one chat app, powered by **Google Gemini** (free) or **OpenAI**. Part of the SRK app family by ShazVerse Technologies.
 
 Each bot has its own **name, avatar, personality, model, chat thread and long-term memory**. Everything runs on your phone — no server or laptop needed.
 
 ## Features
 - Multiple bots, each with its own personality and chat history
 - Long-term memory per bot (edit it yourself, or let the bot save new facts automatically)
-- Choose a GPT model per bot (GPT-6.2 Sol, Astra, Terra, Luna — or any model on your account)
+- Choose a model per bot: Gemini (3.8 Flash, 3.5 Flash-Lite, 4 Argon) or OpenAI GPT — or any model on your account
 - Live streaming replies, stop button, markdown + code formatting
 - Export / import bots and chats as a backup file
 - Dark theme, Android back button support
@@ -22,12 +22,15 @@ Comes with three starter bots: **SRK Assistant**, **Surgery Tutor**, **Idea Part
 Every push to `main` builds a new APK automatically (GitHub Actions → *Build SRK Bot APK*).
 
 ## Set up
-1. Get an OpenAI API key at **platform.openai.com → API keys** and add credit under Billing.
-2. Open SRK Bot → ⚙️ Settings → paste the key → **Save, test key & load my models**.
+1. Get a free Gemini API key at **aistudio.google.com → Get API key** (no card needed).
+2. Optional: an OpenAI key from **platform.openai.com** (needs paid credit) for GPT bots.
+3. Open SRK Bot → ⚙️ Settings → paste the key(s) → **Save, test keys & load my models**.
 
-**Never put your API key in this repo** — it is public and the key would be stolen.
+**Never put your API keys in this repo** — it is public and the keys would be stolen.
 
-Your key and chats are stored only on your device. The key is sent only to `api.openai.com`.
+`signing/debug.keystore` is a debug signing key kept here only so each new APK installs as an update over the previous one.
+
+Your key and chats are stored only on your device. Keys are sent only to Google (`generativelanguage.googleapis.com`) or OpenAI (`api.openai.com`).
 
 ## Try it in a browser
 ```

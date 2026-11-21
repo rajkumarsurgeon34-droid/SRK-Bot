@@ -1,21 +1,31 @@
-/* SRK Bot — a team of personal AI bots, powered by OpenAI.
- * Everything is stored on the device (localStorage). The API key is sent only to api.openai.com.
+/* SRK Bot — a team of personal AI bots, powered by Google Gemini or OpenAI.
+ * Everything is stored on the device (localStorage). Each API key is sent only to its own provider
+ * (generativelanguage.googleapis.com or api.openai.com).
  */
 (() => {
   "use strict";
 
-  const API_BASE = "https://api.openai.com/v1";
+  const OPENAI_BASE = "https://api.openai.com/v1";
+  const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
   const MODELS = [
-    { id: "gpt-6.2-sol", label: "GPT-6.2 Sol — everyday, balanced (default)" },
-    { id: "gpt-6.2-astra", label: "GPT-6.2 Astra — most capable" },
-    { id: "gpt-6.1-terra", label: "GPT-6.1 Terra — fast" },
-    { id: "gpt-6-luna", label: "GPT-6 Luna — cheapest" },
+    { id: "gemini-3.8-flash", label: "Gemini 3.8 Flash — smart and fast (default)" },
+    { id: "gemini-3.5-flash-lite", label: "Gemini 3.5 Flash-Lite — fastest" },
+    { id: "gemini-4-argon", label: "Gemini 4 Argon — most capable" },
+    { id: "gpt-6.2-sol", label: "GPT-6.2 Sol (OpenAI) — balanced" },
+    { id: "gpt-6.2-astra", label: "GPT-6.2 Astra (OpenAI) — most capable" },
+    { id: "gpt-6.1-terra", label: "GPT-6.1 Terra (OpenAI) — fast" },
+    { id: "gpt-6-luna", label: "GPT-6 Luna (OpenAI) — cheapest" },
   ];
-  // All selectable models: the built-in list plus any loaded from the user's account in Settings.
+  const DEFAULT_MODEL = MODELS[0].id;
+  const providerOf = (id) => (/^(gemini|gemma|learnlm)/.test(id) ? "gemini" : "openai");
+  const PROVIDER_NAME = { gemini: "Gemini", openai: "OpenAI" };
+  const keyFor = (prov) => (prov === "gemini" ? state.settings.geminiKey : state.settings.apiKey) || "";
+  // All selectable models: the built-in list plus any loaded from the user's accounts in Settings.
   function allModels() {
     const out = MODELS.slice();
-    for (const id of state.settings.accountModels || []) {
-      if (!out.some((m) => m.id === id)) out.push({ id, label: id });
+    const extra = [...(state.settings.geminiModels || []), ...(state.settings.accountModels || [])];
+    for (const id of extra) {
+      if (!out.some((m) => m.id === id)) out.push({ id, label: id + (providerOf(id) === "openai" ? " (OpenAI)" : "") });
     }
     return out;
   }
@@ -25,7 +35,7 @@
 
   // ---------- state ----------
   const defaultState = () => ({
-    settings: { apiKey: "", maxTokens: 4096, accountModels: [] },
+    settings: { apiKey: "", geminiKey: "", maxTokens: 4096, accountModels: [], geminiModels: [], v3: true },
     bots: [
       makeBot("🤖", "SRK Assistant", "You are SRK Assistant, a friendly, sharp general helper. Be clear and concise.", true),
       makeBot("🩺", "Surgery Tutor", "You are a senior general surgery consultant who teaches postgraduate (DNB/MS) trainees. Explain concepts step by step, cite standard textbooks (Bailey & Love, Sabiston, Schwartz) where relevant, and quiz the user when asked.", true),
@@ -37,7 +47,7 @@
     return {
       id: "b" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
       avatar, name, persona,
-      model: MODELS[0].id,
+      model: DEFAULT_MODEL,
       memory: "",
       autoMemory: !!autoMemory,
       messages: [],
@@ -55,7 +65,15 @@
       const raw = localStorage.getItem(STORE_KEY);
       if (raw) {
         const s = JSON.parse(raw);
-        if (s && Array.isArray(s.bots) && s.settings) return s;
+        if (s && Array.isArray(s.bots) && s.settings) {
+          if (!s.settings.v3) { // one-time move from OpenAI default to Gemini
+            for (const b of s.bots) if (b.model === "gpt-6.2-sol") b.model = DEFAULT_MODEL;
+            s.settings.geminiKey = s.settings.geminiKey || "";
+            s.settings.geminiModels = s.settings.geminiModels || [];
+            s.settings.v3 = true;
+          }
+          return s;
+        }
       }
     } catch (e) { /* storage unavailable or corrupt */ }
     return defaultState();
@@ -135,7 +153,7 @@
 
   // ---------- bot list ----------
   function renderList() {
-    $("key-warning").classList.toggle("hidden", !!state.settings.apiKey);
+    $("key-warning").classList.toggle("hidden", !!(state.settings.apiKey || state.settings.geminiKey));
     const ul = $("bot-list"); ul.innerHTML = "";
     const bots = [...state.bots].sort((a, b) => b.updated - a.updated);
     if (!bots.length) {
@@ -226,18 +244,62 @@
     return clean;
   }
 
-  async function apiError(res) {
-    let msg = "HTTP " + res.status;
-    try { const j = await res.json(); msg = (j.error && j.error.message) || msg; } catch (e) {}
-    if (res.status === 401) msg = "Invalid API key. Check it in Settings.";
-    if (res.status === 429) msg = "OpenAI says: " + msg + " (rate limit or no credit left on your account).";
-    if (res.status === 404) msg = msg + " — pick another model for this bot (✏️), or load your models in Settings.";
+  async function apiError(res, prov) {
+    let msg = "HTTP " + res.status, raw = "";
+    try { const j = await res.json(); raw = (j.error && j.error.message) || ""; msg = raw || msg; } catch (e) {}
+    const name = PROVIDER_NAME[prov];
+    if (res.status === 401 || /API key not valid|API_KEY_INVALID/i.test(raw)) msg = "Invalid " + name + " API key. Check it in Settings.";
+    else if (res.status === 429) msg = name + " says: " + msg + (prov === "gemini"
+      ? " (free-tier limit reached — wait a minute, or pick a lighter model like Flash-Lite)."
+      : " (rate limit or no credit left on your account).");
+    else if (res.status === 404) msg = msg + " — pick another model for this bot (✏️), or load your models in Settings.";
     return msg;
+  }
+
+  function buildRequest(b, prov) {
+    const sys = systemPrompt(b), msgs = apiMessages(b), maxTok = +state.settings.maxTokens || 4096;
+    if (prov === "gemini") {
+      return {
+        url: GEMINI_BASE + "/models/" + encodeURIComponent(b.model) + ":streamGenerateContent?alt=sse",
+        headers: { "content-type": "application/json", "x-goog-api-key": keyFor("gemini") },
+        body: {
+          systemInstruction: { parts: [{ text: sys }] },
+          contents: msgs.map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] })),
+          generationConfig: { maxOutputTokens: maxTok },
+        },
+      };
+    }
+    return {
+      url: OPENAI_BASE + "/responses",
+      headers: { "content-type": "application/json", "authorization": "Bearer " + keyFor("openai") },
+      body: { model: b.model, instructions: sys, input: msgs, max_output_tokens: maxTok, store: false, stream: true },
+    };
+  }
+
+  // Returns text to append from one streamed event, or throws on an error event.
+  function eventText(ev, prov, hasText) {
+    if (prov === "gemini") {
+      if (ev.error) throw new Error(ev.error.message || "Gemini error");
+      if (ev.promptFeedback && ev.promptFeedback.blockReason) throw new Error("Gemini blocked this message (" + ev.promptFeedback.blockReason + ").");
+      const c = ev.candidates && ev.candidates[0];
+      if (!c) return "";
+      const t = ((c.content && c.content.parts) || []).filter((p) => p.text && !p.thought).map((p) => p.text).join("");
+      if (!t && !hasText && /SAFETY|PROHIBITED|BLOCKLIST|RECITATION/.test(c.finishReason || "")) throw new Error("Gemini stopped the reply (" + c.finishReason + ").");
+      if (!t && !hasText && c.finishReason === "MAX_TOKENS") throw new Error("Reply was cut off. Try a higher max reply length in Settings.");
+      return t;
+    }
+    if (ev.type === "response.output_text.delta" && typeof ev.delta === "string") return ev.delta;
+    if (ev.type === "error") throw new Error(ev.message || (ev.error && ev.error.message) || "Stream error");
+    if (ev.type === "response.failed") throw new Error((ev.response && ev.response.error && ev.response.error.message) || "Request failed");
+    if (ev.type === "response.incomplete" && !hasText) throw new Error("Reply was cut off (" + ((ev.response && ev.response.incomplete_details &&
+      ev.response.incomplete_details.reason) || "incomplete") + "). Try a higher max reply length in Settings.");
+    return "";
   }
 
   async function send(text) {
     const b = bot(currentBotId);
-    if (!state.settings.apiKey) { toast("Add your OpenAI API key in Settings first"); return; }
+    const prov = providerOf(b.model);
+    if (!keyFor(prov)) { toast("Add your " + PROVIDER_NAME[prov] + " API key in Settings first"); return; }
     if (!b.messages.length) $("messages").innerHTML = "";
     const userMsg = { role: "user", content: text, ts: Date.now() };
     b.messages.push(userMsg); b.updated = Date.now(); save();
@@ -252,23 +314,11 @@
     abortCtrl = new AbortController();
     let full = "";
     try {
-      const res = await fetch(API_BASE + "/responses", {
-        method: "POST",
-        signal: abortCtrl.signal,
-        headers: {
-          "content-type": "application/json",
-          "authorization": "Bearer " + state.settings.apiKey,
-        },
-        body: JSON.stringify({
-          model: b.model,
-          instructions: systemPrompt(b),
-          input: apiMessages(b),
-          max_output_tokens: +state.settings.maxTokens || 4096,
-          store: false,
-          stream: true,
-        }),
+      const rq = buildRequest(b, prov);
+      const res = await fetch(rq.url, {
+        method: "POST", signal: abortCtrl.signal, headers: rq.headers, body: JSON.stringify(rq.body),
       });
-      if (!res.ok) throw new Error(await apiError(res));
+      if (!res.ok) throw new Error(await apiError(res, prov));
       const reader = res.body.getReader();
       const dec = new TextDecoder();
       let buf = "";
@@ -281,17 +331,11 @@
           const line = buf.slice(0, idx).trim(); buf = buf.slice(idx + 1);
           if (!line.startsWith("data:")) continue;
           let ev; try { ev = JSON.parse(line.slice(5)); } catch (e) { continue; }
-          if (ev.type === "response.output_text.delta" && typeof ev.delta === "string") {
-            full += ev.delta;
+          const t = eventText(ev, prov, !!full);
+          if (t) {
+            full += t;
             el.innerHTML = md(full.replace(/<remember>[\s\S]*?(<\/remember>|$)/g, ""));
             box.scrollTop = box.scrollHeight;
-          } else if (ev.type === "error") {
-            throw new Error(ev.message || (ev.error && ev.error.message) || "Stream error");
-          } else if (ev.type === "response.failed") {
-            throw new Error((ev.response && ev.response.error && ev.response.error.message) || "Request failed");
-          } else if (ev.type === "response.incomplete" && !full) {
-            throw new Error("Reply was cut off (" + ((ev.response && ev.response.incomplete_details &&
-              ev.response.incomplete_details.reason) || "incomplete") + "). Try a higher max reply length in Settings.");
           }
         }
       }
@@ -335,7 +379,7 @@
     $("f-automem").checked = b ? b.autoMemory : true;
     const sel = $("f-model"); sel.innerHTML = "";
     for (const m of allModels()) sel.add(new Option(m.label, m.id));
-    sel.value = b ? b.model : MODELS[0].id;
+    sel.value = b ? b.model : DEFAULT_MODEL;
     if (b && !allModels().some((m) => m.id === b.model)) sel.add(new Option(b.model, b.model, true, true));
     $("edit-danger").classList.toggle("hidden", !b);
     show("edit");
@@ -360,34 +404,52 @@
 
   // ---------- settings ----------
   function openSettings() {
-    $("s-key").value = state.settings.apiKey;
+    $("s-key").value = state.settings.apiKey || "";
+    $("s-gkey").value = state.settings.geminiKey || "";
     $("s-maxtok").value = state.settings.maxTokens;
     $("test-result").textContent = "";
     show("settings");
   }
   async function testKey() {
     state.settings.apiKey = $("s-key").value.trim();
+    state.settings.geminiKey = $("s-gkey").value.trim();
     state.settings.maxTokens = Math.min(64000, Math.max(256, +$("s-maxtok").value || 4096));
     save();
     const out = $("test-result");
-    if (!state.settings.apiKey) { out.textContent = "Key removed."; return; }
+    if (!state.settings.apiKey && !state.settings.geminiKey) { out.textContent = "No keys saved."; return; }
     out.textContent = "Testing…";
+    const lines = [];
+    if (state.settings.geminiKey) lines.push(await testGemini());
+    if (state.settings.apiKey) lines.push(await testOpenAI());
+    out.innerHTML = lines.map(esc).join("<br>");
+  }
+  async function testGemini() {
     try {
-      const res = await fetch(API_BASE + "/models", {
-        headers: { "authorization": "Bearer " + state.settings.apiKey },
-      });
-      if (!res.ok) { out.textContent = "❌ " + (await apiError(res)); return; }
+      const res = await fetch(GEMINI_BASE + "/models?pageSize=1000", { headers: { "x-goog-api-key": state.settings.geminiKey } });
+      if (!res.ok) return "Gemini ❌ " + (await apiError(res, "gemini"));
+      const j = await res.json();
+      const ids = (j.models || [])
+        .filter((m) => (m.supportedGenerationMethods || []).includes("generateContent"))
+        .map((m) => m.name.replace(/^models\//, ""))
+        .filter((id) => /^(gemini|gemma)/.test(id) && !/(tts|image|embedding|live|transcribe|robotics|audio|banana|veo|imagen|computer-use)/.test(id))
+        .sort().reverse();
+      state.settings.geminiModels = ids; save();
+      const missing = MODELS.filter((m) => providerOf(m.id) === "gemini" && !ids.includes(m.id)).map((m) => m.id);
+      return "Gemini ✅ Key works. " + ids.length + " chat models available." + (missing.length ? " Not available to you: " + missing.join(", ") + "." : "");
+    } catch (e) { return "Gemini ❌ Network error: " + e.message; }
+  }
+  async function testOpenAI() {
+    try {
+      const res = await fetch(OPENAI_BASE + "/models", { headers: { "authorization": "Bearer " + state.settings.apiKey } });
+      if (!res.ok) return "OpenAI ❌ " + (await apiError(res, "openai"));
       const j = await res.json();
       const ids = (j.data || []).map((m) => m.id)
         .filter((id) => /^(gpt-|o\d|chatgpt-)/.test(id) &&
           !/(audio|realtime|transcribe|tts|image|search|embedding|instruct|codex|cyber|moderation)/.test(id))
         .sort().reverse();
-      state.settings.accountModels = ids;
-      save();
-      const missing = MODELS.filter((m) => !ids.includes(m.id)).map((m) => m.id);
-      out.textContent = "✅ Key works. " + ids.length + " chat models available on your account." +
-        (missing.length ? " Not on your account: " + missing.join(", ") + " — choose another model per bot." : "");
-    } catch (e) { out.textContent = "❌ Network error: " + e.message; }
+      state.settings.accountModels = ids; save();
+      return "OpenAI ✅ Key works. " + ids.length + " chat models available (replies need credit on your OpenAI account).";
+    } catch (e) { return "OpenAI ❌ Network error: " + e.message; }
   }
 
   async function exportData() {
@@ -473,8 +535,9 @@
   });
 
   // start
+  save(); // persist any one-time upgrade done in load()
   history.replaceState({ view: "list" }, "", "#list");
   renderList();
   show("list", false);
-  if (!state.settings.apiKey) setTimeout(openSettings, 300);
+  if (!state.settings.apiKey && !state.settings.geminiKey) setTimeout(openSettings, 300);
 })();
