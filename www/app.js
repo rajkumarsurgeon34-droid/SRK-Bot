@@ -1,21 +1,31 @@
-/* SRK Bot — a team of personal AI bots, powered by Claude.
- * Everything is stored on the device (localStorage). The API key is sent only to api.anthropic.com.
+/* SRK Bot — a team of personal AI bots, powered by OpenAI.
+ * Everything is stored on the device (localStorage). The API key is sent only to api.openai.com.
  */
 (() => {
   "use strict";
 
-  const API_URL = "https://api.anthropic.com/v1/messages";
+  const API_BASE = "https://api.openai.com/v1";
   const MODELS = [
-    { id: "claude-sonnet-5-5", label: "Claude Sonnet 5.5 — balanced (default)" },
-    { id: "claude-opus-5-5", label: "Claude Opus 5.5 — smartest" },
-    { id: "claude-haiku-5-5", label: "Claude Haiku 5.5 — fastest, cheapest" },
+    { id: "gpt-6.2-sol", label: "GPT-6.2 Sol — everyday, balanced (default)" },
+    { id: "gpt-6.2-astra", label: "GPT-6.2 Astra — most capable" },
+    { id: "gpt-6.1-terra", label: "GPT-6.1 Terra — fast" },
+    { id: "gpt-6-luna", label: "GPT-6 Luna — cheapest" },
   ];
+  // All selectable models: the built-in list plus any loaded from the user's account in Settings.
+  function allModels() {
+    const out = MODELS.slice();
+    for (const id of state.settings.accountModels || []) {
+      if (!out.some((m) => m.id === id)) out.push({ id, label: id });
+    }
+    return out;
+  }
+  const modelLabel = (id) => (allModels().find((m) => m.id === id) || { label: id }).label.split(" —")[0];
   const HISTORY_LIMIT = 40; // messages sent per request (older ones stay saved on device)
-  const STORE_KEY = "srkbot.v1";
+  const STORE_KEY = "srkbot.v2";
 
   // ---------- state ----------
   const defaultState = () => ({
-    settings: { apiKey: "", maxTokens: 2048 },
+    settings: { apiKey: "", maxTokens: 4096, accountModels: [] },
     bots: [
       makeBot("🤖", "SRK Assistant", "You are SRK Assistant, a friendly, sharp general helper. Be clear and concise.", true),
       makeBot("🩺", "Surgery Tutor", "You are a senior general surgery consultant who teaches postgraduate (DNB/MS) trainees. Explain concepts step by step, cite standard textbooks (Bailey & Love, Sabiston, Schwartz) where relevant, and quiz the user when asked.", true),
@@ -152,7 +162,7 @@
     const b = bot(id);
     $("chat-avatar").textContent = b.avatar || "🤖";
     $("chat-name").textContent = b.name;
-    $("chat-sub").textContent = (MODELS.find((m) => m.id === b.model) || { label: b.model }).label.split(" —")[0];
+    $("chat-sub").textContent = modelLabel(b.model);
     renderMessages();
     show("chat", push);
     setTimeout(() => $("input").focus(), 50);
@@ -216,9 +226,18 @@
     return clean;
   }
 
+  async function apiError(res) {
+    let msg = "HTTP " + res.status;
+    try { const j = await res.json(); msg = (j.error && j.error.message) || msg; } catch (e) {}
+    if (res.status === 401) msg = "Invalid API key. Check it in Settings.";
+    if (res.status === 429) msg = "OpenAI says: " + msg + " (rate limit or no credit left on your account).";
+    if (res.status === 404) msg = msg + " — pick another model for this bot (✏️), or load your models in Settings.";
+    return msg;
+  }
+
   async function send(text) {
     const b = bot(currentBotId);
-    if (!state.settings.apiKey) { toast("Add your Claude API key in Settings first"); return; }
+    if (!state.settings.apiKey) { toast("Add your OpenAI API key in Settings first"); return; }
     if (!b.messages.length) $("messages").innerHTML = "";
     const userMsg = { role: "user", content: text, ts: Date.now() };
     b.messages.push(userMsg); b.updated = Date.now(); save();
@@ -233,29 +252,23 @@
     abortCtrl = new AbortController();
     let full = "";
     try {
-      const res = await fetch(API_URL, {
+      const res = await fetch(API_BASE + "/responses", {
         method: "POST",
         signal: abortCtrl.signal,
         headers: {
           "content-type": "application/json",
-          "x-api-key": state.settings.apiKey,
-          "anthropic-version": "2023-06-01",
-          "anthropic-dangerous-direct-browser-access": "true",
+          "authorization": "Bearer " + state.settings.apiKey,
         },
         body: JSON.stringify({
           model: b.model,
-          max_tokens: +state.settings.maxTokens || 2048,
-          system: systemPrompt(b),
-          messages: apiMessages(b),
+          instructions: systemPrompt(b),
+          input: apiMessages(b),
+          max_output_tokens: +state.settings.maxTokens || 4096,
+          store: false,
           stream: true,
         }),
       });
-      if (!res.ok) {
-        let msg = "HTTP " + res.status;
-        try { const j = await res.json(); msg = (j.error && j.error.message) || msg; } catch (e) {}
-        if (res.status === 401) msg = "Invalid API key. Check it in Settings.";
-        throw new Error(msg);
-      }
+      if (!res.ok) throw new Error(await apiError(res));
       const reader = res.body.getReader();
       const dec = new TextDecoder();
       let buf = "";
@@ -268,12 +281,17 @@
           const line = buf.slice(0, idx).trim(); buf = buf.slice(idx + 1);
           if (!line.startsWith("data:")) continue;
           let ev; try { ev = JSON.parse(line.slice(5)); } catch (e) { continue; }
-          if (ev.type === "content_block_delta" && ev.delta && ev.delta.type === "text_delta") {
-            full += ev.delta.text;
+          if (ev.type === "response.output_text.delta" && typeof ev.delta === "string") {
+            full += ev.delta;
             el.innerHTML = md(full.replace(/<remember>[\s\S]*?(<\/remember>|$)/g, ""));
             box.scrollTop = box.scrollHeight;
           } else if (ev.type === "error") {
-            throw new Error((ev.error && ev.error.message) || "Stream error");
+            throw new Error(ev.message || (ev.error && ev.error.message) || "Stream error");
+          } else if (ev.type === "response.failed") {
+            throw new Error((ev.response && ev.response.error && ev.response.error.message) || "Request failed");
+          } else if (ev.type === "response.incomplete" && !full) {
+            throw new Error("Reply was cut off (" + ((ev.response && ev.response.incomplete_details &&
+              ev.response.incomplete_details.reason) || "incomplete") + "). Try a higher max reply length in Settings.");
           }
         }
       }
@@ -316,9 +334,9 @@
     $("f-memory").value = b ? b.memory : "";
     $("f-automem").checked = b ? b.autoMemory : true;
     const sel = $("f-model"); sel.innerHTML = "";
-    for (const m of MODELS) sel.add(new Option(m.label, m.id));
+    for (const m of allModels()) sel.add(new Option(m.label, m.id));
     sel.value = b ? b.model : MODELS[0].id;
-    if (b && !MODELS.some((m) => m.id === b.model)) sel.add(new Option(b.model, b.model, true, true));
+    if (b && !allModels().some((m) => m.id === b.model)) sel.add(new Option(b.model, b.model, true, true));
     $("edit-danger").classList.toggle("hidden", !b);
     show("edit");
   }
@@ -349,28 +367,26 @@
   }
   async function testKey() {
     state.settings.apiKey = $("s-key").value.trim();
-    state.settings.maxTokens = Math.min(32000, Math.max(256, +$("s-maxtok").value || 2048));
+    state.settings.maxTokens = Math.min(64000, Math.max(256, +$("s-maxtok").value || 4096));
     save();
     const out = $("test-result");
     if (!state.settings.apiKey) { out.textContent = "Key removed."; return; }
     out.textContent = "Testing…";
     try {
-      const res = await fetch(API_URL, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-api-key": state.settings.apiKey,
-          "anthropic-version": "2023-06-01",
-          "anthropic-dangerous-direct-browser-access": "true",
-        },
-        body: JSON.stringify({ model: "claude-haiku-5-5", max_tokens: 8, messages: [{ role: "user", content: "Say OK" }] }),
+      const res = await fetch(API_BASE + "/models", {
+        headers: { "authorization": "Bearer " + state.settings.apiKey },
       });
-      if (res.ok) out.textContent = "✅ Key works. You're ready to chat.";
-      else {
-        let m = "HTTP " + res.status;
-        try { const j = await res.json(); m = (j.error && j.error.message) || m; } catch (e) {}
-        out.textContent = "❌ " + m;
-      }
+      if (!res.ok) { out.textContent = "❌ " + (await apiError(res)); return; }
+      const j = await res.json();
+      const ids = (j.data || []).map((m) => m.id)
+        .filter((id) => /^(gpt-|o\d|chatgpt-)/.test(id) &&
+          !/(audio|realtime|transcribe|tts|image|search|embedding|instruct|codex|cyber|moderation)/.test(id))
+        .sort().reverse();
+      state.settings.accountModels = ids;
+      save();
+      const missing = MODELS.filter((m) => !ids.includes(m.id)).map((m) => m.id);
+      out.textContent = "✅ Key works. " + ids.length + " chat models available on your account." +
+        (missing.length ? " Not on your account: " + missing.join(", ") + " — choose another model per bot." : "");
     } catch (e) { out.textContent = "❌ Network error: " + e.message; }
   }
 

@@ -1,7 +1,7 @@
 {
   "name": "srk-bot",
   "version": "1.0.0",
-  "description": "SRK Bot — your own team of AI bots, powered by Claude. Android app.",
+  "description": "SRK Bot — your own team of AI bots, powered by OpenAI. Android app.",
   "private": true,
   "license": "Apache-2.0",
   "scripts": {

@@ -18,7 +18,7 @@
       <button class="icon" id="btn-settings" aria-label="Settings">⚙️</button>
     </header>
     <div id="key-warning" class="notice hidden">
-      Add your Claude API key in <b>Settings</b> to start chatting.
+      Add your OpenAI API key in <b>Settings</b> to start chatting.
     </div>
     <ul id="bot-list"></ul>
     <button id="btn-new-bot" class="fab" aria-label="New bot">＋</button>
@@ -83,14 +83,14 @@
       <span class="icon"></span>
     </header>
     <div class="form">
-      <label>Claude API key
-        <input id="s-key" type="password" autocomplete="off" placeholder="sk-ant-…">
+      <label>OpenAI API key
+        <input id="s-key" type="password" autocomplete="off" placeholder="sk-proj-…">
       </label>
-      <p class="hint">Get a key at console.anthropic.com → API Keys. It is stored only on this device and sent only to api.anthropic.com.</p>
+      <p class="hint">Get a key at platform.openai.com → API keys. It is stored only on this device and sent only to api.openai.com.</p>
       <label>Max reply length (tokens)
-        <input id="s-maxtok" type="number" min="256" max="32000" step="256">
+        <input id="s-maxtok" type="number" min="256" max="64000" step="256">
       </label>
-      <button class="primary" id="btn-test-key">Save &amp; test key</button>
+      <button class="primary" id="btn-test-key">Save, test key &amp; load my models</button>
       <p class="hint" id="test-result"></p>
       <hr>
       <button class="ghost" id="btn-export">Export bots &amp; chats</button>

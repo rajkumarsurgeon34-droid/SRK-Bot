@@ -1,13 +1,13 @@
 # SRK Bot
 
-Your own team of AI bots in one chat app, powered by **Claude**. Part of the SRK app family by ShazVerse Technologies.
+Your own team of AI bots in one chat app, powered by **OpenAI** (GPT models). Part of the SRK app family by ShazVerse Technologies.
 
 Each bot has its own **name, avatar, personality, model, chat thread and long-term memory**. Everything runs on your phone — no server or laptop needed.
 
 ## Features
 - Multiple bots, each with its own personality and chat history
 - Long-term memory per bot (edit it yourself, or let the bot save new facts automatically)
-- Choose Claude Opus 5.5, Sonnet 5.5 or Haiku 5.5 per bot
+- Choose a GPT model per bot (GPT-6.2 Sol, Astra, Terra, Luna — or any model on your account)
 - Live streaming replies, stop button, markdown + code formatting
 - Export / import bots and chats as a backup file
 - Dark theme, Android back button support
@@ -22,10 +22,12 @@ Comes with three starter bots: **SRK Assistant**, **Surgery Tutor**, **Idea Part
 Every push to `main` builds a new APK automatically (GitHub Actions → *Build SRK Bot APK*).
 
 ## Set up
-1. Get a Claude API key at **console.anthropic.com → API Keys** (pay-as-you-go billing).
-2. Open SRK Bot → ⚙️ Settings → paste the key → **Save & test key**.
+1. Get an OpenAI API key at **platform.openai.com → API keys** and add credit under Billing.
+2. Open SRK Bot → ⚙️ Settings → paste the key → **Save, test key & load my models**.
 
-Your key and chats are stored only on your device. The key is sent only to `api.anthropic.com`.
+**Never put your API key in this repo** — it is public and the key would be stolen.
+
+Your key and chats are stored only on your device. The key is sent only to `api.openai.com`.
 
 ## Try it in a browser
 ```
