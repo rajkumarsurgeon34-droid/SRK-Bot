@@ -17,8 +17,8 @@
     { id: "gpt-6-luna", label: "GPT-6 Luna (OpenAI) — cheapest" },
   ];
   const DEFAULT_MODEL = MODELS[0].id;
-  const providerOf = (id) => (/^(gemini|gemma|learnlm)/.test(id) ? "gemini" : "openai");
-  const PROVIDER_NAME = { gemini: "Gemini", openai: "OpenAI" };
+  const providerOf = (id) => (id.startsWith("local:") ? "local" : /^(gemini|gemma|learnlm)/.test(id) ? "gemini" : "openai");
+  const PROVIDER_NAME = { gemini: "Gemini", openai: "OpenAI", local: "Offline" };
   const keyFor = (prov) => (prov === "gemini" ? state.settings.geminiKey : state.settings.apiKey) || "";
   // All selectable models: the built-in list plus any loaded from the user's accounts in Settings.
   function allModels() {
@@ -26,6 +26,9 @@
     const extra = [...(state.settings.geminiModels || []), ...(state.settings.accountModels || [])];
     for (const id of extra) {
       if (!out.some((m) => m.id === id)) out.push({ id, label: id + (providerOf(id) === "openai" ? " (OpenAI)" : "") });
+    }
+    for (const m of offlineModels()) {
+      out.push({ id: m.id, label: "📴 Offline · " + m.label + (offlineDownloaded.includes(m.id) ? "" : " (download in Settings)") });
     }
     return out;
   }
@@ -153,7 +156,7 @@
 
   // ---------- bot list ----------
   function renderList() {
-    $("key-warning").classList.toggle("hidden", !!(state.settings.apiKey || state.settings.geminiKey));
+    $("key-warning").classList.toggle("hidden", !!(state.settings.apiKey || state.settings.geminiKey || offlineDownloaded.length));
     const ul = $("bot-list"); ul.innerHTML = "";
     const bots = [...state.bots].sort((a, b) => b.updated - a.updated);
     if (!bots.length) {
@@ -313,10 +316,82 @@
     return "";
   }
 
+  // ----- offline (on-device) models -----
+  let offlineDownloaded = [];
+  const offlineApi = () => window.SRKOffline || null;
+  const offlineModels = () => (offlineApi() ? offlineApi().LOCAL_MODELS : []);
+  async function refreshOffline() {
+    if (!offlineApi()) return;
+    offlineDownloaded = await offlineApi().downloaded();
+  }
+  window.addEventListener("srk-offline-ready", () => {
+    refreshOffline().then(() => { renderOfflineList(); if ($("view-list").classList.contains("active")) renderList(); });
+  });
+
+  function localSystemPrompt(b) {
+    let s = (b.persona || "You are a helpful assistant.").trim();
+    s += "\nYour name is " + b.name + ". Answer clearly and briefly.";
+    if (b.memory.trim()) s += "\nFacts about the user:\n" + b.memory.trim();
+    return s;
+  }
+  const isNetworkError = (err) => err && (err.name === "TypeError" || /Failed to fetch|NetworkError|network/i.test(err.message || ""));
+
+  async function streamLocal(model, b, onText, setStatus) {
+    const api = offlineApi();
+    if (!api) throw new Error("Offline engine is still starting — try again in a moment.");
+    const msgs = apiMessages(b).slice(-12);
+    await api.chat({
+      id: model, system: localSystemPrompt(b), messages: msgs,
+      maxTokens: +state.settings.maxTokens || 1024, signal: abortCtrl.signal,
+      onText, onStatus: setStatus,
+    });
+  }
+
+  async function streamOnline(b, prov, onText) {
+    let res, usedModel = b.model;
+    const plan = attemptPlan(b.model, prov);
+    for (let i = 0; i < plan.length; i++) {
+      usedModel = plan[i];
+      if (i > 0) await sleep(i === 1 ? 1500 : 500);
+      if (abortCtrl.signal.aborted) throw new DOMException("Aborted", "AbortError");
+      const rq = buildRequest(b, prov, usedModel);
+      res = await fetch(rq.url, {
+        method: "POST", signal: abortCtrl.signal, headers: rq.headers, body: JSON.stringify(rq.body),
+      });
+      if (res.ok) break;
+      const busy = [429, 500, 502, 503, 504].includes(res.status);
+      if (!busy || i === plan.length - 1) throw new Error(await apiError(res, prov));
+      if (i >= 1) toast(modelLabel(usedModel) + " is busy — trying another model…");
+      try { await res.text(); } catch (e) {}
+    }
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "", got = false;
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, idx).trim(); buf = buf.slice(idx + 1);
+        if (!line.startsWith("data:")) continue;
+        let ev; try { ev = JSON.parse(line.slice(5)); } catch (e) { continue; }
+        const t = eventText(ev, prov, got);
+        if (t) { got = true; onText(t); }
+      }
+    }
+    return usedModel;
+  }
+
   async function send(text) {
     const b = bot(currentBotId);
     const prov = providerOf(b.model);
-    if (!keyFor(prov)) { toast("Add your " + PROVIDER_NAME[prov] + " API key in Settings first"); return; }
+    if (prov === "local" && !offlineDownloaded.includes(b.model)) {
+      toast("Download this offline model first: ⚙️ Settings → Offline AI"); return;
+    }
+    if (prov !== "local" && !keyFor(prov) && !offlineDownloaded.length) {
+      toast("Add your " + PROVIDER_NAME[prov] + " API key in Settings first"); return;
+    }
     if (!b.messages.length) $("messages").innerHTML = "";
     const userMsg = { role: "user", content: text, ts: Date.now() };
     b.messages.push(userMsg); b.updated = Date.now(); save();
@@ -330,42 +405,27 @@
     setBusy(true);
     abortCtrl = new AbortController();
     let full = "", switchNote = "";
+    const onText = (t) => {
+      full += t;
+      el.innerHTML = md(full.replace(/<remember>[\s\S]*?(<\/remember>|$)/g, ""));
+      box.scrollTop = box.scrollHeight;
+    };
+    const setStatus = (msg) => { if (!full) el.textContent = msg || ""; };
     try {
-      let res, usedModel = b.model;
-      const plan = attemptPlan(b.model, prov);
-      for (let i = 0; i < plan.length; i++) {
-        usedModel = plan[i];
-        if (i > 0) await sleep(i === 1 ? 1500 : 500);
-        if (abortCtrl.signal.aborted) throw new DOMException("Aborted", "AbortError");
-        const rq = buildRequest(b, prov, usedModel);
-        res = await fetch(rq.url, {
-          method: "POST", signal: abortCtrl.signal, headers: rq.headers, body: JSON.stringify(rq.body),
-        });
-        if (res.ok) break;
-        const busy = [429, 500, 502, 503, 504].includes(res.status);
-        if (!busy || i === plan.length - 1) throw new Error(await apiError(res, prov));
-        if (i >= 1) toast(modelLabel(usedModel) + " is busy — trying another model…");
-        try { await res.text(); } catch (e) {}
-      }
-      if (usedModel !== b.model) switchNote = "⚡ " + modelLabel(b.model) + " was busy, so " + modelLabel(usedModel) + " answered";
-      const reader = res.body.getReader();
-      const dec = new TextDecoder();
-      let buf = "";
-      for (;;) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buf += dec.decode(value, { stream: true });
-        let idx;
-        while ((idx = buf.indexOf("\n")) >= 0) {
-          const line = buf.slice(0, idx).trim(); buf = buf.slice(idx + 1);
-          if (!line.startsWith("data:")) continue;
-          let ev; try { ev = JSON.parse(line.slice(5)); } catch (e) { continue; }
-          const t = eventText(ev, prov, !!full);
-          if (t) {
-            full += t;
-            el.innerHTML = md(full.replace(/<remember>[\s\S]*?(<\/remember>|$)/g, ""));
-            box.scrollTop = box.scrollHeight;
-          }
+      if (prov === "local") {
+        await streamLocal(b.model, b, onText, setStatus);
+      } else {
+        try {
+          if (!keyFor(prov)) throw new TypeError("no key");
+          const used = await streamOnline(b, prov, onText);
+          if (used !== b.model) switchNote = "⚡ " + modelLabel(b.model) + " was busy, so " + modelLabel(used) + " answered";
+        } catch (err) {
+          // No internet (or no key)? Answer with a downloaded offline model instead.
+          if (!full && err.name !== "AbortError" && isNetworkError(err) && offlineDownloaded.length) {
+            const fb = offlineDownloaded[0];
+            switchNote = "📴 No internet — answered offline with " + modelLabel(fb).replace(/^📴 Offline · /, "");
+            await streamLocal(fb, b, onText, setStatus);
+          } else throw err;
         }
       }
     } catch (err) {
@@ -373,7 +433,7 @@
       else {
         el.remove();
         const e = { role: "error", content: "⚠️ " + (err.message || err) +
-          (String(err.message).includes("Failed to fetch") ? " — check your internet connection." : "") };
+          (String(err.message).includes("Failed to fetch") ? " — check your internet connection, or download an offline model in Settings." : "") };
         box.appendChild(msgEl(e)); box.scrollTop = box.scrollHeight;
         setBusy(false); abortCtrl = null;
         return;
@@ -438,6 +498,8 @@
     $("s-gkey").value = state.settings.geminiKey || "";
     $("s-maxtok").value = state.settings.maxTokens;
     $("test-result").textContent = "";
+    refreshOffline().then(renderOfflineList);
+    renderOfflineList();
     show("settings");
   }
   async function testKey() {
@@ -480,6 +542,61 @@
       state.settings.accountModels = ids; save();
       return "OpenAI ✅ Key works. " + ids.length + " chat models available (replies need credit on your OpenAI account).";
     } catch (e) { return "OpenAI ❌ Network error: " + e.message; }
+  }
+
+  // ----- Offline AI settings -----
+  let dl = null; // { id, loaded, total, ctrl }
+  function renderOfflineList() {
+    const box = $("offline-list");
+    if (!box) return;
+    if (!offlineApi()) { box.innerHTML = '<p class="hint">Offline engine is starting…</p>'; return; }
+    box.innerHTML = "";
+    for (const m of offlineModels()) {
+      const has = offlineDownloaded.includes(m.id);
+      const busy = dl && dl.id === m.id;
+      const row = document.createElement("div");
+      row.className = "om";
+      let sub = has ? "✅ Downloaded · works offline" : "≈ " + (m.sizeMB >= 1000 ? (m.sizeMB / 1000).toFixed(1) + " GB" : m.sizeMB + " MB") + " download";
+      if (busy) {
+        const pct = dl.total ? Math.floor((dl.loaded / dl.total) * 100) : 0;
+        sub = "Downloading… " + pct + "% (" + Math.round(dl.loaded / 1e6) + " / " + Math.round((dl.total || m.sizeMB * 1e6) / 1e6) + " MB) — keep the app open";
+      }
+      row.innerHTML = '<div class="om-meta"><div class="om-name">' + esc(m.label) + '</div><div class="om-sub">' + esc(sub) + "</div>" +
+        (busy ? '<div class="bar-prog"><i style="width:' + (dl.total ? (dl.loaded / dl.total) * 100 : 0) + '%"></i></div>' : "") + "</div>";
+      const btn = document.createElement("button");
+      if (busy) { btn.textContent = "Cancel"; btn.onclick = () => dl.ctrl.abort(); }
+      else if (has) { btn.textContent = "Delete"; btn.onclick = () => deleteOffline(m); }
+      else { btn.textContent = "Download"; btn.className = "dl"; btn.disabled = !!dl; btn.onclick = () => downloadOffline(m); }
+      row.appendChild(btn);
+      box.appendChild(row);
+    }
+  }
+  async function downloadOffline(m) {
+    if (dl) return;
+    dl = { id: m.id, loaded: 0, total: 0, ctrl: new AbortController() };
+    renderOfflineList();
+    let last = 0;
+    try {
+      await offlineApi().download(m.id, (loaded, total) => {
+        dl.loaded = loaded; dl.total = total;
+        if (Date.now() - last > 400) { last = Date.now(); renderOfflineList(); }
+      }, dl.ctrl.signal);
+      await refreshOffline();
+      toast("✅ " + m.label.split(" —")[0] + " ready — choose it for any bot (✏️ → Model)", 4000);
+    } catch (e) {
+      if (e.name === "AbortError" || /abort/i.test(e.message || "")) toast("Download cancelled");
+      else toast("Download failed: " + (e.message || e) + " — check Wi-Fi and free storage", 4500);
+    }
+    dl = null;
+    await refreshOffline();
+    renderOfflineList();
+  }
+  async function deleteOffline(m) {
+    if (!confirm("Delete " + m.label.split(" —")[0] + " from this phone? You can download it again later.")) return;
+    try { await offlineApi().remove(m.id); } catch (e) { toast("Delete failed: " + e.message); }
+    await refreshOffline();
+    renderOfflineList();
+    toast("Deleted");
   }
 
   async function exportData() {

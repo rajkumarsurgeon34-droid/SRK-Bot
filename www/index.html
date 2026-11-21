@@ -97,6 +97,10 @@
       <button class="primary" id="btn-test-key">Save, test keys &amp; load my models</button>
       <p class="hint" id="test-result"></p>
       <hr>
+      <h3 class="sec">📴 Offline AI (no internet needed)</h3>
+      <p class="hint">Download a model once over Wi-Fi. It then runs on your phone without internet — free and private, but slower and less smart than Gemini. Bots also switch to it automatically when there's no internet.</p>
+      <div id="offline-list"></div>
+      <hr>
       <button class="ghost" id="btn-export">Export bots &amp; chats</button>
       <button class="ghost" id="btn-import">Import backup</button>
       <input type="file" id="import-file" accept="application/json" hidden>
@@ -107,5 +111,6 @@
 </div>
 <div id="toast" class="hidden"></div>
 <script src="app.js"></script>
+<script type="module" src="offline.js"></script>
 </body>
 </html>

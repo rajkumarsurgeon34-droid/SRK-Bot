@@ -8,6 +8,7 @@ Each bot has its own **name, avatar, personality, model, chat thread and long-te
 - Multiple bots, each with its own personality and chat history
 - Long-term memory per bot (edit it yourself, or let the bot save new facts automatically)
 - Choose a model per bot: Gemini (3.8 Flash, 3.5 Flash-Lite, 4 Argon) or OpenAI GPT — or any model on your account
+- **Offline AI**: download Gemma 3 1B, Qwen 2.5 1.5B or Qwen 2.5 0.5B once and chat with no internet (runs on the phone via llama.cpp / wllama). Bots fall back to it automatically when offline
 - Live streaming replies, stop button, markdown + code formatting
 - Export / import bots and chats as a backup file
 - Dark theme, Android back button support
@@ -38,5 +39,9 @@ npm run serve
 ```
 Then open http://localhost:5173 (works on Windows too).
 
+## Offline AI
+Settings → 📴 Offline AI → Download (use Wi-Fi, keep the app open). Then pick the model for any bot (✏️ → Model). Models come from Hugging Face (ggml-org/gemma-3-1b-it-GGUF, Qwen/Qwen2.5-*-Instruct-GGUF) and are stored in the app's private storage.
+
 ## Credits
+Offline engine: [wllama](https://github.com/ngxson/wllama) (MIT), a WebAssembly build of llama.cpp.
 Inspired by the idea behind [OpenMausBot](https://github.com/milind-soni/OpenMausBot) (Apache-2.0): AI as a messaging app with a roster of bots. SRK Bot is an independent, simpler, phone-only implementation and shares no code with it.
