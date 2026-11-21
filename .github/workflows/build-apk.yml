@@ -1,0 +1,61 @@
+name: Build SRK Bot APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Create Android project
+        run: |
+          npx cap add android
+          npx capacitor-assets generate --android \
+            --iconBackgroundColor '#0f1115' --iconBackgroundColorDark '#0f1115' \
+            --splashBackgroundColor '#0f1115' --splashBackgroundColorDark '#0f1115'
+          npx cap sync android
+
+      - name: Build APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+          cp app/build/outputs/apk/debug/app-debug.apk ../SRK-Bot.apk
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SRK-Bot-apk
+          path: SRK-Bot.apk
+
+      - name: Publish to Releases (latest)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: SRK Bot v1.0.${{ github.run_number }}
+          body: |
+            Download **SRK-Bot.apk** below and open it on your Android phone to install.
+            (Allow "Install unknown apps" for your browser/Files app if asked.)
+          files: SRK-Bot.apk
+          make_latest: true

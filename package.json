@@ -1,0 +1,18 @@
+{
+  "name": "srk-bot",
+  "version": "1.0.0",
+  "description": "SRK Bot — your own team of AI bots, powered by Claude. Android app.",
+  "private": true,
+  "license": "Apache-2.0",
+  "scripts": {
+    "serve": "npx --yes serve www -l 5173"
+  },
+  "dependencies": {
+    "@capacitor/android": "^7.0.0",
+    "@capacitor/core": "^7.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^7.0.0"
+  }
+}

@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="theme-color" content="#0f1115">
+<title>SRK Bot</title>
+<link rel="manifest" href="manifest.json">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- Bot list -->
+  <section id="view-list" class="view active">
+    <header class="bar">
+      <h1><span class="logo">SRK</span> Bot</h1>
+      <button class="icon" id="btn-settings" aria-label="Settings">⚙️</button>
+    </header>
+    <div id="key-warning" class="notice hidden">
+      Add your Claude API key in <b>Settings</b> to start chatting.
+    </div>
+    <ul id="bot-list"></ul>
+    <button id="btn-new-bot" class="fab" aria-label="New bot">＋</button>
+  </section>
+
+  <!-- Chat -->
+  <section id="view-chat" class="view">
+    <header class="bar">
+      <button class="icon" id="btn-back" aria-label="Back">←</button>
+      <div class="chat-title" id="chat-title-wrap">
+        <span class="avatar" id="chat-avatar"></span>
+        <div>
+          <div id="chat-name"></div>
+          <div class="sub" id="chat-sub"></div>
+        </div>
+      </div>
+      <button class="icon" id="btn-edit-bot" aria-label="Edit bot">✏️</button>
+    </header>
+    <div id="messages"></div>
+    <form id="composer">
+      <textarea id="input" rows="1" placeholder="Message…" enterkeyhint="send"></textarea>
+      <button type="submit" id="btn-send" aria-label="Send">➤</button>
+    </form>
+  </section>
+
+  <!-- Bot editor -->
+  <section id="view-edit" class="view">
+    <header class="bar">
+      <button class="icon" id="btn-edit-cancel" aria-label="Cancel">✕</button>
+      <h2 id="edit-heading">New bot</h2>
+      <button class="text" id="btn-edit-save">Save</button>
+    </header>
+    <div class="form">
+      <label>Avatar (emoji)
+        <input id="f-avatar" maxlength="4" placeholder="🤖">
+      </label>
+      <label>Name
+        <input id="f-name" maxlength="40" placeholder="e.g. Surgery Tutor">
+      </label>
+      <label>Personality / instructions
+        <textarea id="f-persona" rows="6" placeholder="How this bot should think, talk and behave."></textarea>
+      </label>
+      <label>Model
+        <select id="f-model"></select>
+      </label>
+      <label>Memory (facts this bot always remembers)
+        <textarea id="f-memory" rows="4" placeholder="One fact per line. The bot can also add to this itself."></textarea>
+      </label>
+      <label class="row"><input type="checkbox" id="f-automem"> Let the bot save new facts to its memory</label>
+      <div class="danger-zone" id="edit-danger">
+        <button class="ghost" id="btn-clear-chat">Clear chat history</button>
+        <button class="ghost red" id="btn-delete-bot">Delete bot</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Settings -->
+  <section id="view-settings" class="view">
+    <header class="bar">
+      <button class="icon" id="btn-settings-back" aria-label="Back">←</button>
+      <h2>Settings</h2>
+      <span class="icon"></span>
+    </header>
+    <div class="form">
+      <label>Claude API key
+        <input id="s-key" type="password" autocomplete="off" placeholder="sk-ant-…">
+      </label>
+      <p class="hint">Get a key at console.anthropic.com → API Keys. It is stored only on this device and sent only to api.anthropic.com.</p>
+      <label>Max reply length (tokens)
+        <input id="s-maxtok" type="number" min="256" max="32000" step="256">
+      </label>
+      <button class="primary" id="btn-test-key">Save &amp; test key</button>
+      <p class="hint" id="test-result"></p>
+      <hr>
+      <button class="ghost" id="btn-export">Export bots &amp; chats</button>
+      <button class="ghost" id="btn-import">Import backup</button>
+      <input type="file" id="import-file" accept="application/json" hidden>
+      <p class="hint">SRK Bot · ShazVerse Technologies</p>
+    </div>
+  </section>
+
+</div>
+<div id="toast" class="hidden"></div>
+<script src="app.js"></script>
+</body>
+</html>
