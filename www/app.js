@@ -256,11 +256,28 @@
     return msg;
   }
 
-  function buildRequest(b, prov) {
+  // Models to try, in order, when the chosen one is busy/over its free limit.
+  const GEMINI_FALLBACKS = ["gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-3.6-flash", "gemini-3.7-flash",
+    "gemini-3.1-flash-lite", "gemini-3-flash", "gemini-2.5-flash", "gemini-2.5-flash-lite"];
+  function attemptPlan(model, prov) {
+    const plan = [model, model]; // first: retry the same model once
+    if (prov === "gemini") {
+      const avail = state.settings.geminiModels || [];
+      for (const m of GEMINI_FALLBACKS) {
+        if (plan.length >= 5) break;
+        if (m !== model && !plan.includes(m) && (!avail.length || avail.includes(m))) plan.push(m);
+      }
+    }
+    return plan;
+  }
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  function buildRequest(b, prov, model) {
+    model = model || b.model;
     const sys = systemPrompt(b), msgs = apiMessages(b), maxTok = +state.settings.maxTokens || 4096;
     if (prov === "gemini") {
       return {
-        url: GEMINI_BASE + "/models/" + encodeURIComponent(b.model) + ":streamGenerateContent?alt=sse",
+        url: GEMINI_BASE + "/models/" + encodeURIComponent(model) + ":streamGenerateContent?alt=sse",
         headers: { "content-type": "application/json", "x-goog-api-key": keyFor("gemini") },
         body: {
           systemInstruction: { parts: [{ text: sys }] },
@@ -272,7 +289,7 @@
     return {
       url: OPENAI_BASE + "/responses",
       headers: { "content-type": "application/json", "authorization": "Bearer " + keyFor("openai") },
-      body: { model: b.model, instructions: sys, input: msgs, max_output_tokens: maxTok, store: false, stream: true },
+      body: { model, instructions: sys, input: msgs, max_output_tokens: maxTok, store: false, stream: true },
     };
   }
 
@@ -312,13 +329,25 @@
 
     setBusy(true);
     abortCtrl = new AbortController();
-    let full = "";
+    let full = "", switchNote = "";
     try {
-      const rq = buildRequest(b, prov);
-      const res = await fetch(rq.url, {
-        method: "POST", signal: abortCtrl.signal, headers: rq.headers, body: JSON.stringify(rq.body),
-      });
-      if (!res.ok) throw new Error(await apiError(res, prov));
+      let res, usedModel = b.model;
+      const plan = attemptPlan(b.model, prov);
+      for (let i = 0; i < plan.length; i++) {
+        usedModel = plan[i];
+        if (i > 0) await sleep(i === 1 ? 1500 : 500);
+        if (abortCtrl.signal.aborted) throw new DOMException("Aborted", "AbortError");
+        const rq = buildRequest(b, prov, usedModel);
+        res = await fetch(rq.url, {
+          method: "POST", signal: abortCtrl.signal, headers: rq.headers, body: JSON.stringify(rq.body),
+        });
+        if (res.ok) break;
+        const busy = [429, 500, 502, 503, 504].includes(res.status);
+        if (!busy || i === plan.length - 1) throw new Error(await apiError(res, prov));
+        if (i >= 1) toast(modelLabel(usedModel) + " is busy — trying another model…");
+        try { await res.text(); } catch (e) {}
+      }
+      if (usedModel !== b.model) switchNote = "⚡ " + modelLabel(b.model) + " was busy, so " + modelLabel(usedModel) + " answered";
       const reader = res.body.getReader();
       const dec = new TextDecoder();
       let buf = "";
@@ -356,6 +385,7 @@
       el.innerHTML = md(clean);
       b.messages.push({ role: "assistant", content: clean, ts: Date.now() });
       b.updated = Date.now(); save();
+      if (switchNote) { box.appendChild(msgEl({ role: "note", content: switchNote })); box.scrollTop = box.scrollHeight; }
     } else el.remove();
     setBusy(false); abortCtrl = null;
   }
