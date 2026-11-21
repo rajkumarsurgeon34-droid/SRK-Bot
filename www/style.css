@@ -102,3 +102,7 @@ hr { border: 0; border-top: 1px solid var(--line); width: 100%; }
 .bar-prog { height: 5px; background: var(--line); border-radius: 3px; margin-top: 6px; overflow: hidden; }
 .bar-prog > i { display: block; height: 100%; background: var(--accent2); width: 0; }
 #offline-list { display: flex; flex-direction: column; gap: 10px; }
+.stack { display: flex; flex-direction: column; gap: 14px; }
+#edition-tag { font-size: 13px; font-weight: 600; color: #7ee2a8; margin-left: 8px; vertical-align: middle;
+  border: 1px solid #2f6b4a; padding: 2px 8px; border-radius: 10px; }
+#edition-tag:empty { display: none; }

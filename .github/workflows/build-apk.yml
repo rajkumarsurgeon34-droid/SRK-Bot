@@ -1,4 +1,4 @@
-name: Build SRK Bot APK
+name: Build SRK Bot APKs
 
 on:
   push:
@@ -11,6 +11,15 @@ permissions:
 jobs:
   android:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - edition: full
+            assets: assets
+            apk: SRK-Bot.apk
+          - edition: offline
+            assets: assets-offline
+            apk: SRK-Bot-Offline.apk
     steps:
       - uses: actions/checkout@v4
 
@@ -30,10 +39,13 @@ jobs:
           npm install
           npm run vendor
 
+      - name: Select edition (${{ matrix.edition }})
+        run: node scripts/edition.js ${{ matrix.edition }}
+
       - name: Create Android project
         run: |
           npx cap add android
-          npx capacitor-assets generate --android \
+          npx capacitor-assets generate --android --assetPath ${{ matrix.assets }} \
             --iconBackgroundColor '#0f1115' --iconBackgroundColorDark '#0f1115' \
             --splashBackgroundColor '#0f1115' --splashBackgroundColorDark '#0f1115'
           npx cap sync android
@@ -48,13 +60,22 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon
-          cp app/build/outputs/apk/debug/app-debug.apk ../SRK-Bot.apk
+          cp app/build/outputs/apk/debug/app-debug.apk ../${{ matrix.apk }}
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SRK-Bot-apk
-          path: SRK-Bot.apk
+          name: ${{ matrix.edition }}
+          path: ${{ matrix.apk }}
+
+  release:
+    needs: android
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: apks
+          merge-multiple: true
 
       - name: Publish to Releases (latest)
         uses: softprops/action-gh-release@v2
@@ -62,7 +83,11 @@ jobs:
           tag_name: v1.0.${{ github.run_number }}
           name: SRK Bot v1.0.${{ github.run_number }}
           body: |
-            Download **SRK-Bot.apk** below and open it on your Android phone to install.
+            Two apps — install either or both (they sit side by side):
+            - **SRK-Bot.apk** — online bots (Gemini / OpenAI) + offline backup
+            - **SRK-Bot-Offline.apk** — fully offline, on-device AI, no API key needed
+
+            Open the APK on your Android phone to install or update.
             (Allow "Install unknown apps" for your browser/Files app if asked.)
-          files: SRK-Bot.apk
+          files: apks/*.apk
           make_latest: true

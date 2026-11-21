@@ -15,9 +15,15 @@ Each bot has its own **name, avatar, personality, model, chat thread and long-te
 
 Comes with three starter bots: **SRK Assistant**, **Surgery Tutor**, **Idea Partner**.
 
+## Two apps
+- **SRK Bot** (`SRK-Bot.apk`, red icon) — online bots with Gemini / OpenAI, plus offline backup.
+- **SRK Bot Offline** (`SRK-Bot-Offline.apk`, green icon) — fully on-device, no API key, no internet after the one-time model download.
+
+They install side by side. Both are built from this repo (`node scripts/edition.js full|offline`).
+
 ## Install on Android
 1. Open the **Releases** page of this repo on your phone.
-2. Download `SRK-Bot.apk` from the latest release and open it.
+2. Download `SRK-Bot.apk` and/or `SRK-Bot-Offline.apk` from the latest release and open it.
 3. Allow "Install unknown apps" if asked.
 
 Every push to `main` builds a new APK automatically (GitHub Actions → *Build SRK Bot APK*).

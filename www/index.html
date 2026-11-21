@@ -14,7 +14,7 @@
   <!-- Bot list -->
   <section id="view-list" class="view active">
     <header class="bar">
-      <h1><span class="logo">SRK</span> Bot</h1>
+      <h1><span class="logo">SRK</span> Bot<span id="edition-tag"></span></h1>
       <button class="icon" id="btn-settings" aria-label="Settings">⚙️</button>
     </header>
     <div id="key-warning" class="notice hidden">
@@ -83,6 +83,7 @@
       <span class="icon"></span>
     </header>
     <div class="form">
+      <div id="online-settings" class="stack">
       <label>Google Gemini API key (free)
         <input id="s-gkey" type="password" autocomplete="off" placeholder="AIza…">
       </label>
@@ -91,25 +92,27 @@
         <input id="s-key" type="password" autocomplete="off" placeholder="sk-proj-…">
       </label>
       <p class="hint">Only needed for GPT bots. Keys are stored only on this device and sent only to Google or OpenAI.</p>
-      <label>Max reply length (tokens)
-        <input id="s-maxtok" type="number" min="256" max="64000" step="256">
-      </label>
       <button class="primary" id="btn-test-key">Save, test keys &amp; load my models</button>
       <p class="hint" id="test-result"></p>
       <hr>
+      </div>
       <h3 class="sec">📴 Offline AI (no internet needed)</h3>
-      <p class="hint">Download a model once over Wi-Fi. It then runs on your phone without internet — free and private, but slower and less smart than Gemini. Bots also switch to it automatically when there's no internet.</p>
+      <p class="hint" id="offline-hint">Download a model once over Wi-Fi. It then runs on your phone without internet — free and private, but slower and less smart than Gemini. Bots also switch to it automatically when there's no internet.</p>
       <div id="offline-list"></div>
+      <label>Max reply length (tokens)
+        <input id="s-maxtok" type="number" min="256" max="64000" step="256">
+      </label>
       <hr>
       <button class="ghost" id="btn-export">Export bots &amp; chats</button>
       <button class="ghost" id="btn-import">Import backup</button>
       <input type="file" id="import-file" accept="application/json" hidden>
-      <p class="hint">SRK Bot · ShazVerse Technologies</p>
+      <p class="hint"><span class="app-name">SRK Bot</span> · ShazVerse Technologies</p>
     </div>
   </section>
 
 </div>
 <div id="toast" class="hidden"></div>
+<script src="edition.js"></script>
 <script src="app.js"></script>
 <script type="module" src="offline.js"></script>
 </body>

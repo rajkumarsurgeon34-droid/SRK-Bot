@@ -16,14 +16,16 @@
     { id: "gpt-6.1-terra", label: "GPT-6.1 Terra (OpenAI) — fast" },
     { id: "gpt-6-luna", label: "GPT-6 Luna (OpenAI) — cheapest" },
   ];
-  const DEFAULT_MODEL = MODELS[0].id;
+  const OFFLINE_ONLY = window.SRK_EDITION === "offline"; // "SRK Bot Offline" app: on-device models only
+  const OFFLINE_DEFAULT = "local:gemma-3-1b";
+  const DEFAULT_MODEL = OFFLINE_ONLY ? OFFLINE_DEFAULT : MODELS[0].id;
   const providerOf = (id) => (id.startsWith("local:") ? "local" : /^(gemini|gemma|learnlm)/.test(id) ? "gemini" : "openai");
   const PROVIDER_NAME = { gemini: "Gemini", openai: "OpenAI", local: "Offline" };
   const keyFor = (prov) => (prov === "gemini" ? state.settings.geminiKey : state.settings.apiKey) || "";
   // All selectable models: the built-in list plus any loaded from the user's accounts in Settings.
   function allModels() {
-    const out = MODELS.slice();
-    const extra = [...(state.settings.geminiModels || []), ...(state.settings.accountModels || [])];
+    const out = OFFLINE_ONLY ? [] : MODELS.slice();
+    const extra = OFFLINE_ONLY ? [] : [...(state.settings.geminiModels || []), ...(state.settings.accountModels || [])];
     for (const id of extra) {
       if (!out.some((m) => m.id === id)) out.push({ id, label: id + (providerOf(id) === "openai" ? " (OpenAI)" : "") });
     }
@@ -325,7 +327,14 @@
     offlineDownloaded = await offlineApi().downloaded();
   }
   window.addEventListener("srk-offline-ready", () => {
-    refreshOffline().then(() => { renderOfflineList(); if ($("view-list").classList.contains("active")) renderList(); });
+    refreshOffline().then(() => {
+      renderOfflineList();
+      if ($("view-list").classList.contains("active")) {
+        renderList();
+        // SRK Bot Offline, first launch: go straight to the model download
+        if (OFFLINE_ONLY && !offlineDownloaded.length) openSettings();
+      }
+    });
   });
 
   function localSystemPrompt(b) {
@@ -385,6 +394,7 @@
 
   async function send(text) {
     const b = bot(currentBotId);
+    if (OFFLINE_ONLY && providerOf(b.model) !== "local") b.model = offlineDownloaded[0] || OFFLINE_DEFAULT;
     const prov = providerOf(b.model);
     if (prov === "local" && !offlineDownloaded.includes(b.model)) {
       toast("Download this offline model first: ⚙️ Settings → Offline AI"); return;
@@ -582,7 +592,7 @@
         if (Date.now() - last > 400) { last = Date.now(); renderOfflineList(); }
       }, dl.ctrl.signal);
       await refreshOffline();
-      toast("✅ " + m.label.split(" —")[0] + " ready — choose it for any bot (✏️ → Model)", 4000);
+      toast("✅ " + m.label.split(" —")[0] + (OFFLINE_ONLY ? " ready — go back and start chatting" : " ready — choose it for any bot (✏️ → Model)"), 4000);
     } catch (e) {
       if (e.name === "AbortError" || /abort/i.test(e.message || "")) toast("Download cancelled");
       else toast("Download failed: " + (e.message || e) + " — check Wi-Fi and free storage", 4500);
@@ -646,6 +656,9 @@
   $("chat-title-wrap").onclick = () => openEditor(currentBotId);
   $("btn-edit-save").onclick = saveEditor;
   $("btn-test-key").onclick = testKey;
+  $("s-maxtok").onchange = () => {
+    state.settings.maxTokens = Math.min(64000, Math.max(256, +$("s-maxtok").value || 4096)); save();
+  };
   $("btn-export").onclick = exportData;
   $("btn-import").onclick = () => $("import-file").click();
   $("import-file").onchange = (e) => { if (e.target.files[0]) importData(e.target.files[0]); e.target.value = ""; };
@@ -686,5 +699,12 @@
   history.replaceState({ view: "list" }, "", "#list");
   renderList();
   show("list", false);
-  if (!state.settings.apiKey && !state.settings.geminiKey) setTimeout(openSettings, 300);
+  if (OFFLINE_ONLY) {
+    document.title = "SRK Bot Offline";
+    $("edition-tag").textContent = "Offline";
+    $("online-settings").classList.add("hidden");
+    $("key-warning").innerHTML = "Download an offline AI model in <b>Settings</b> to start chatting (one time, over Wi-Fi).";
+    $("offline-hint").textContent = "Download a model once over Wi-Fi. Everything then runs on your phone — no internet, no API key, free and private. Bigger models are smarter but slower.";
+    document.querySelectorAll(".app-name").forEach((e) => (e.textContent = "SRK Bot Offline"));
+  } else if (!state.settings.apiKey && !state.settings.geminiKey) setTimeout(openSettings, 300);
 })();
