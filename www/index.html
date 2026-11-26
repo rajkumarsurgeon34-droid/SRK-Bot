@@ -92,10 +92,14 @@
         <input id="s-okey" type="password" autocomplete="off" placeholder="sk-or-…">
       </label>
       <p class="hint">Optional. Free key at openrouter.ai → Keys (no card). When Gemini hits its free limit, bots answer with OpenRouter's free models (DeepSeek, Llama, Qwen…).</p>
+      <label>DeepSeek API key (optional, very cheap)
+        <input id="s-dkey" type="password" autocomplete="off" placeholder="sk-…">
+      </label>
+      <p class="hint">For DeepSeek V4.1 Flash bots. Key at platform.deepseek.com → API keys (needs a small prepaid top-up).</p>
       <label>OpenAI API key (optional, paid)
         <input id="s-key" type="password" autocomplete="off" placeholder="sk-proj-…">
       </label>
-      <p class="hint">Only needed for GPT bots. Keys are stored only on this device and sent only to Google, OpenRouter or OpenAI.</p>
+      <p class="hint">Only needed for GPT bots. Keys are stored only on this device and sent only to Google, DeepSeek, OpenRouter or OpenAI.</p>
       <button class="primary" id="btn-test-key">Save, test keys &amp; load my models</button>
       <p class="hint" id="test-result"></p>
       <hr>

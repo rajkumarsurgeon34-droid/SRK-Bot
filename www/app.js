@@ -1,6 +1,6 @@
-/* SRK Bot — a team of personal AI bots, powered by Google Gemini, OpenAI or OpenRouter's free models.
+/* SRK Bot — a team of personal AI bots, powered by Google Gemini, DeepSeek, OpenAI or OpenRouter's free models.
  * Everything is stored on the device (localStorage). Each API key is sent only to its own provider
- * (generativelanguage.googleapis.com, api.openai.com or openrouter.ai).
+ * (generativelanguage.googleapis.com, api.deepseek.com, api.openai.com or openrouter.ai).
  */
 (() => {
   "use strict";
@@ -8,10 +8,12 @@
   const OPENAI_BASE = "https://api.openai.com/v1";
   const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
   const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
+  const DEEPSEEK_BASE = "https://api.deepseek.com";
   const MODELS = [
     { id: "gemini-3.8-flash", label: "Gemini 3.8 Flash — smart and fast (default)" },
     { id: "gemini-3.5-flash-lite", label: "Gemini 3.5 Flash-Lite — fastest" },
     { id: "gemini-4-argon", label: "Gemini 4 Argon — most capable" },
+    { id: "deepseek-flash", label: "DeepSeek V4.1 Flash — strong reasoning, very cheap" },
     { id: "gpt-6.2-sol", label: "GPT-6.2 Sol (OpenAI) — balanced" },
     { id: "gpt-6.2-astra", label: "GPT-6.2 Astra (OpenAI) — most capable" },
     { id: "gpt-6.1-terra", label: "GPT-6.1 Terra (OpenAI) — fast" },
@@ -21,17 +23,17 @@
   const OFFLINE_DEFAULT = "local:gemma-3-1b";
   const DEFAULT_MODEL = OFFLINE_ONLY ? OFFLINE_DEFAULT : MODELS[0].id;
   // OpenRouter model ids look like "vendor/model:free" (the only ids with a "/").
-  const providerOf = (id) => (id.startsWith("local:") ? "local" : id.includes("/") ? "openrouter" : /^(gemini|gemma|learnlm)/.test(id) ? "gemini" : "openai");
-  const PROVIDER_NAME = { gemini: "Gemini", openai: "OpenAI", openrouter: "OpenRouter", local: "Offline" };
-  const keyFor = (prov) => (prov === "gemini" ? state.settings.geminiKey : prov === "openrouter" ? state.settings.openrouterKey : state.settings.apiKey) || "";
-  const hasAnyKey = () => !!(state.settings.apiKey || state.settings.geminiKey || state.settings.openrouterKey);
+  const providerOf = (id) => (id.startsWith("local:") ? "local" : id.includes("/") ? "openrouter" : /^(gemini|gemma|learnlm)/.test(id) ? "gemini" : /^deepseek-/.test(id) ? "deepseek" : "openai");
+  const PROVIDER_NAME = { gemini: "Gemini", deepseek: "DeepSeek", openai: "OpenAI", openrouter: "OpenRouter", local: "Offline" };
+  const keyFor = (prov) => (prov === "gemini" ? state.settings.geminiKey : prov === "openrouter" ? state.settings.openrouterKey : prov === "deepseek" ? state.settings.deepseekKey : state.settings.apiKey) || "";
+  const hasAnyKey = () => !!(state.settings.apiKey || state.settings.geminiKey || state.settings.openrouterKey || state.settings.deepseekKey);
   // All selectable models: the built-in list plus any loaded from the user's accounts in Settings.
   function allModels() {
     const out = OFFLINE_ONLY ? [] : MODELS.slice();
-    const extra = OFFLINE_ONLY ? [] : [...(state.settings.geminiModels || []), ...(state.settings.accountModels || []), ...(state.settings.orModels || [])];
+    const extra = OFFLINE_ONLY ? [] : [...(state.settings.geminiModels || []), ...(state.settings.deepseekModels || []), ...(state.settings.accountModels || []), ...(state.settings.orModels || [])];
     for (const id of extra) {
       const p = providerOf(id);
-      if (!out.some((m) => m.id === id)) out.push({ id, label: id + (p === "openai" ? " (OpenAI)" : p === "openrouter" ? " (OpenRouter, free)" : "") });
+      if (!out.some((m) => m.id === id)) out.push({ id, label: id + (p === "openai" ? " (OpenAI)" : p === "openrouter" ? " (OpenRouter, free)" : p === "deepseek" ? " (DeepSeek)" : "") });
     }
     for (const m of offlineModels()) {
       out.push({ id: m.id, label: "📴 Offline · " + m.label + (offlineDownloaded.includes(m.id) ? "" : " (download in Settings)") });
@@ -44,7 +46,7 @@
 
   // ---------- state ----------
   const defaultState = () => ({
-    settings: { apiKey: "", geminiKey: "", openrouterKey: "", maxTokens: 4096, accountModels: [], geminiModels: [], orModels: [], v3: true },
+    settings: { apiKey: "", geminiKey: "", openrouterKey: "", deepseekKey: "", deepseekModels: [], maxTokens: 4096, accountModels: [], geminiModels: [], orModels: [], v3: true },
     bots: [
       makeBot("🤖", "SRK Assistant", "You are SRK Assistant, a friendly, sharp general helper. Be clear and concise.", true),
       makeBot("🩺", "Surgery Tutor", "You are a senior general surgery consultant who teaches postgraduate (DNB/MS) trainees. Explain concepts step by step, cite standard textbooks (Bailey & Love, Sabiston, Schwartz) where relevant, and quiz the user when asked.", true),
@@ -261,7 +263,9 @@
     else if (res.status === 429) msg = name + " says: " + msg + (prov === "gemini"
       ? " (free-tier limit reached — wait a minute, pick a lighter model like Flash-Lite, or add a free OpenRouter key in Settings as a backup)."
       : prov === "openrouter" ? " (OpenRouter free-model limit reached — try again later or pick another free model)."
+      : prov === "deepseek" ? " (DeepSeek is busy — try again in a moment)."
       : " (rate limit or no credit left on your account).");
+    else if (res.status === 402 && prov === "deepseek") msg = "DeepSeek account has no balance left — top up at platform.deepseek.com.";
     else if (res.status === 404) msg = msg + " — pick another model for this bot (✏️), or load your models in Settings.";
     return msg;
   }
@@ -308,6 +312,14 @@
         },
       };
     }
+    if (prov === "deepseek") {
+      // Thinking is on by default and its tokens count toward max_tokens, so allow extra room.
+      return {
+        url: DEEPSEEK_BASE + "/chat/completions",
+        headers: { "content-type": "application/json", "authorization": "Bearer " + keyFor("deepseek") },
+        body: { model, messages: [{ role: "system", content: sys }, ...msgs], max_tokens: Math.max(maxTok, 32000), stream: true },
+      };
+    }
     if (prov === "openrouter") {
       return {
         url: OPENROUTER_BASE + "/chat/completions",
@@ -334,8 +346,8 @@
       if (!t && !hasText && c.finishReason === "MAX_TOKENS") throw new Error("Reply was cut off. Try a higher max reply length in Settings.");
       return t;
     }
-    if (prov === "openrouter") {
-      if (ev.error) throw new Error("OpenRouter: " + (ev.error.message || "error"));
+    if (prov === "openrouter" || prov === "deepseek") {
+      if (ev.error) throw new Error(PROVIDER_NAME[prov] + ": " + (ev.error.message || "error"));
       const ch = ev.choices && ev.choices[0];
       return (ch && ch.delta && typeof ch.delta.content === "string") ? ch.delta.content : "";
     }
@@ -385,7 +397,7 @@
     });
   }
 
-  async function streamOnline(b, prov, onText, startModel) {
+  async function streamOnline(b, prov, onText, startModel, onThinking) {
     startModel = startModel || b.model;
     let res, usedModel = startModel;
     const plan = attemptPlan(startModel, prov);
@@ -417,6 +429,7 @@
         let ev; try { ev = JSON.parse(line.slice(5)); } catch (e) { continue; }
         const t = eventText(ev, prov, got);
         if (t) { got = true; onText(t); }
+        else if (!got && onThinking && ev.choices && ev.choices[0] && ev.choices[0].delta && ev.choices[0].delta.reasoning_content) onThinking();
       }
     }
     return usedModel;
@@ -458,7 +471,7 @@
         try {
           try {
             if (!keyFor(prov)) { const e = new Error("no key"); e.noKey = true; throw e; }
-            const used = await streamOnline(b, prov, onText);
+            const used = await streamOnline(b, prov, onText, null, () => setStatus("💭 Thinking…"));
             if (used !== b.model) switchNote = "⚡ " + modelLabel(b.model) + " was busy, so " + modelLabel(used) + " answered";
           } catch (err) {
             // Gemini/OpenAI over its limit (or no key for it)? Answer with a free OpenRouter model instead.
@@ -548,6 +561,7 @@
     $("s-key").value = state.settings.apiKey || "";
     $("s-gkey").value = state.settings.geminiKey || "";
     $("s-okey").value = state.settings.openrouterKey || "";
+    $("s-dkey").value = state.settings.deepseekKey || "";
     $("s-maxtok").value = state.settings.maxTokens;
     $("test-result").textContent = "";
     refreshOffline().then(renderOfflineList);
@@ -558,6 +572,7 @@
     state.settings.apiKey = $("s-key").value.trim();
     state.settings.geminiKey = $("s-gkey").value.trim();
     state.settings.openrouterKey = $("s-okey").value.trim();
+    state.settings.deepseekKey = $("s-dkey").value.trim();
     state.settings.maxTokens = Math.min(64000, Math.max(256, +$("s-maxtok").value || 4096));
     save();
     const out = $("test-result");
@@ -565,6 +580,7 @@
     out.textContent = "Testing…";
     const lines = [];
     if (state.settings.geminiKey) lines.push(await testGemini());
+    if (state.settings.deepseekKey) lines.push(await testDeepSeek());
     if (state.settings.openrouterKey) lines.push(await testOpenRouter());
     if (state.settings.apiKey) lines.push(await testOpenAI());
     out.innerHTML = lines.map(esc).join("<br>");
@@ -583,6 +599,24 @@
       const missing = MODELS.filter((m) => providerOf(m.id) === "gemini" && !ids.includes(m.id)).map((m) => m.id);
       return "Gemini ✅ Key works. " + ids.length + " chat models available." + (missing.length ? " Not available to you: " + missing.join(", ") + "." : "");
     } catch (e) { return "Gemini ❌ Network error: " + e.message; }
+  }
+  async function testDeepSeek() {
+    try {
+      const res = await fetch(DEEPSEEK_BASE + "/models", { headers: { "authorization": "Bearer " + state.settings.deepseekKey } });
+      if (!res.ok) return "DeepSeek ❌ " + (await apiError(res, "deepseek"));
+      const j = await res.json();
+      const ids = (j.data || []).map((m) => m.id).filter((id) => /^deepseek-/.test(id) && !/(embed|ocr)/.test(id));
+      state.settings.deepseekModels = ids; save();
+      let bal = "";
+      try {
+        const br = await fetch(DEEPSEEK_BASE + "/user/balance", { headers: { "authorization": "Bearer " + state.settings.deepseekKey } });
+        if (br.ok) {
+          const bj = await br.json(), info = (bj.balance_infos || [])[0];
+          if (info) bal = " Balance: " + info.total_balance + " " + info.currency + ".";
+        }
+      } catch (e) {}
+      return "DeepSeek ✅ Key works. " + ids.length + " models available." + bal;
+    } catch (e) { return "DeepSeek ❌ Network error: " + e.message; }
   }
   async function testOpenRouter() {
     try {
